@@ -14,7 +14,7 @@ const ADMIN_USER_ID = "959684975"; // <-- ID ANDA SUDAH DI-SET
 // ===============================================
 
 // ===== PERBAIKAN DI SINI =====
-// Pengecekan FIREFLY_TOKEN_URL dihapus karena tidak lagi digunakan
+// HANYA cek TELEGRAM_TOKEN. Pengecekan FIREFLY_TOKEN_URL sudah dihapus.
 if (!TELEGRAM_TOKEN) {
     console.error("Error: Pastikan TELEGRAM_TOKEN ada di file .env atau variabel environment.");
     process.exit(1);
@@ -167,12 +167,13 @@ bot.onText(/\/adddays (.+)/, async (msg, match) => {
         }
 
         const response = await addDaysToAllUsers(days);
-        bot.sendMessage(msg.chat.id, response); 
+        bot.sendMessage(msg.chat.id, response); // Kirim pesan sukses (HANYA SEKALI)
 
     } catch (err) {
         bot.sendMessage(msg.chat.id, `Error: ${err.message}`);
     }
 });
+// =========================================
 
 
 // Perintah /buat
