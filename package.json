@@ -1,7 +1,7 @@
 {
   "name": "rf-gen-bot",
   "version": "1.0.0",
-  "description": "Bot Telegram untuk generate video Adobe Firefly",
+  "description": "Bot Telegram untuk generate video Google Veo 3.1",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
@@ -9,8 +9,8 @@
   "keywords": [
     "telegram",
     "bot",
-    "firefly",
-    "veo"
+    "veo",
+    "google"
   ],
   "author": "Yudistira",
   "license": "ISC",
@@ -19,6 +19,6 @@
     "dotenv": "^16.4.5",
     "node-telegram-bot-api": "^0.66.0",
     "sqlite3": "^5.1.7",
-    "uuid": "^13.0.0"
+    "uuid": "^9.0.1"
   }
 }
