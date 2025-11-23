@@ -4,7 +4,7 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { generateVideo, generateVideoFromImage } = require('./fireflyService');
 const fs = require('fs');
-// Impor semua fungsi database
+// Impor semua fungsi, termasuk 'addDaysToAllUsers'
 const { setLicense, checkUserAccess, getAllUsers, deleteUser, addDaysToAllUsers } = require('./database.js'); 
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -16,10 +16,13 @@ const ADMIN_USER_ID = "959684975"; // <-- Pastikan ini ID Anda
 // Variabel status maintenance (Default: false / mati)
 let isMaintenanceMode = false;
 
-if (!TELEGRAM_TOKEN || !process.env.FIREFLY_TOKEN_URL) {
-    console.error("Error: Pastikan TELEGRAM_TOKEN dan FIREFLY_TOKEN_URL ada di file .env");
+// --- BAGIAN YANG DIUBAH (Hanya cek TELEGRAM_TOKEN) ---
+if (!TELEGRAM_TOKEN) {
+    console.error("Error: Pastikan TELEGRAM_TOKEN ada di file .env / Variables Railway");
     process.exit(1);
 }
+// -----------------------------------------------------
+
 if (ADMIN_USER_ID === "GANTI_DENGAN_ID_ADMIN_ANDA") {
      console.error("Error: Harap isi ADMIN_USER_ID di file bot.js");
     process.exit(1);
