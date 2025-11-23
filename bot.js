@@ -4,31 +4,30 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { generateVideo, generateVideoFromImage } = require('./fireflyService');
 const fs = require('fs');
-// Impor semua fungsi, termasuk 'addDaysToAllUsers'
+// Impor semua fungsi database
 const { setLicense, checkUserAccess, getAllUsers, deleteUser, addDaysToAllUsers } = require('./database.js'); 
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 
-// ===== ID ADMIN ANDA SUDAH DIMASUKKAN DI SINI =====
-const ADMIN_USER_ID = "959684975"; // <-- ID ANDA SUDAH DI-SET
-// ===============================================
+// ===== ID ADMIN ANDA =====
+const ADMIN_USER_ID = "959684975"; // <-- Pastikan ini ID Anda
+// =========================
 
-// ===== PERBAIKAN DI SINI =====
-// Pengecekan FIREFLY_TOKEN_URL dihapus karena tidak lagi digunakan
-if (!TELEGRAM_TOKEN) {
-    console.error("Error: Pastikan TELEGRAM_TOKEN ada di file .env atau variabel environment.");
+// Variabel status maintenance (Default: false / mati)
+let isMaintenanceMode = false;
+
+if (!TELEGRAM_TOKEN || !process.env.FIREFLY_TOKEN_URL) {
+    console.error("Error: Pastikan TELEGRAM_TOKEN dan FIREFLY_TOKEN_URL ada di file .env");
     process.exit(1);
 }
-// =============================
-
 if (ADMIN_USER_ID === "GANTI_DENGAN_ID_ADMIN_ANDA") {
-     console.error("Error: Harap isi ADMIN_USER_ID di file bot.js (baris 13)");
+     console.error("Error: Harap isi ADMIN_USER_ID di file bot.js");
     process.exit(1);
 }
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 let userState = new Map();
-console.log('Bot Telegram "Rf Gen" v14 (Bulk Update) sedang berjalan...');
+console.log('Bot Telegram sedang berjalan...');
 
 // --- FUNGSI BARU: Mengirim Pilihan Mode ---
 async function sendModeSelection(chatId) {
@@ -46,8 +45,14 @@ async function sendModeSelection(chatId) {
 }
 // ------------------------------------------
 
-// Perintah /start (Hanya menampilkan status lisensi sekali)
+// Perintah /start
 bot.onText(/\/start/, async (msg) => {
+    // --- CEK MAINTENANCE ---
+    if (isMaintenanceMode && msg.from.id.toString() !== ADMIN_USER_ID) {
+        return bot.sendMessage(msg.chat.id, "⚠️ **SISTEM SEDANG MAINTENANCE**\n\nMohon maaf, bot sedang dalam perbaikan/update sistem. Silakan coba lagi nanti.");
+    }
+    // -----------------------
+
     userState.delete(msg.chat.id);
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
@@ -81,7 +86,9 @@ bot.onText(/\/batal/, (msg) => {
     }
 });
 
-// Perintah Admin /lisensi
+// ===== PERINTAH-PERINTAH ADMIN =====
+
+// Admin: /lisensi
 bot.onText(/\/lisensi (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
@@ -98,7 +105,7 @@ bot.onText(/\/lisensi (.+)/, async (msg, match) => {
     }
 });
 
-// Perintah Admin /blokir
+// Admin: /blokir
 bot.onText(/\/blokir (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
@@ -112,7 +119,7 @@ bot.onText(/\/blokir (.+)/, async (msg, match) => {
     }
 });
 
-// Perintah Admin /hapus
+// Admin: /hapus
 bot.onText(/\/hapus (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
@@ -126,7 +133,7 @@ bot.onText(/\/hapus (.+)/, async (msg, match) => {
     }
 });
 
-// Perintah Admin /listusers
+// Admin: /listusers
 bot.onText(/\/listusers/, async (msg) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
 
@@ -156,27 +163,48 @@ bot.onText(/\/listusers/, async (msg) => {
     }
 });
 
-// Perintah Admin /adddays
+// Admin: /adddays
 bot.onText(/\/adddays (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
         const days = parseInt(match[1], 10);
-        
         if (isNaN(days) || days <= 0) {
             throw new Error("Format salah. Masukkan jumlah hari yang valid. Contoh: /adddays 30");
         }
-
         const response = await addDaysToAllUsers(days);
         bot.sendMessage(msg.chat.id, response); 
-
     } catch (err) {
         bot.sendMessage(msg.chat.id, `Error: ${err.message}`);
     }
 });
 
+// Admin: /mt (Maintenance Mode)
+bot.onText(/\/mt (.+)/, (msg, match) => {
+    if (msg.from.id.toString() !== ADMIN_USER_ID) return;
+
+    const action = match[1].toLowerCase().trim();
+
+    if (action === 'on') {
+        isMaintenanceMode = true;
+        bot.sendMessage(msg.chat.id, "Pv 🛠️ **MAINTENANCE MODE: AKTIF**\n\nUser biasa tidak bisa menggunakan bot. Admin tetap bisa.");
+    } else if (action === 'off') {
+        isMaintenanceMode = false;
+        bot.sendMessage(msg.chat.id, "✅ **MAINTENANCE MODE: MATI**\n\nBot kembali normal untuk semua user.");
+    } else {
+        bot.sendMessage(msg.chat.id, "Gunakan: /mt on atau /mt off");
+    }
+});
+// ===================================
+
 
 // Perintah /buat
 bot.onText(/\/buat/, async (msg) => { 
+    // --- CEK MAINTENANCE ---
+    if (isMaintenanceMode && msg.from.id.toString() !== ADMIN_USER_ID) {
+        return bot.sendMessage(msg.chat.id, "⚠️ **SISTEM SEDANG MAINTENANCE**\n\nMohon maaf, bot sedang dalam perbaikan/update sistem. Silakan coba lagi nanti.");
+    }
+    // -----------------------
+
     const chatId = msg.chat.id;
     userState.delete(chatId); 
     await sendModeSelection(chatId); 
@@ -184,6 +212,12 @@ bot.onText(/\/buat/, async (msg) => {
 
 // Listener untuk GAMBAR (I2V)
 bot.on('photo', async (msg) => {
+    // --- CEK MAINTENANCE ---
+    if (isMaintenanceMode && msg.from.id.toString() !== ADMIN_USER_ID) {
+        return bot.sendMessage(msg.chat.id, "⚠️ **SISTEM SEDANG MAINTENANCE**\n\nGambar Anda tidak diproses karena sedang update.");
+    }
+    // -----------------------
+
     const chatId = msg.chat.id;
     const state = userState.get(chatId);
 
@@ -217,6 +251,13 @@ Sekarang, silakan kirimkan prompt untuk video Anda (bisa teks biasa atau format 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id.toString();
+
+    // --- CEK MAINTENANCE ---
+    if (isMaintenanceMode && userId !== ADMIN_USER_ID) {
+        return; // Diam saja, jangan balas
+    }
+    // -----------------------
+
     if (!msg.text || msg.text.startsWith('/')) return; 
 
     const state = userState.get(chatId);
@@ -304,6 +345,15 @@ bot.on('callback_query', async (query) => {
     const data = query.data;
     const state = userState.get(chatId);
     const msgId = query.message.message_id;
+
+    // --- CEK MAINTENANCE ---
+    if (isMaintenanceMode && userId !== ADMIN_USER_ID) {
+        return bot.answerCallbackQuery(query.id, {
+            text: "⚠️ Sedang Maintenance. Coba lagi nanti.",
+            show_alert: true
+        });
+    }
+    // -----------------------
 
     bot.answerCallbackQuery(query.id).catch(err => console.log("Mengabaikan error 'query too old'"));
 
