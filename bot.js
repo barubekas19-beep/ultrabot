@@ -4,7 +4,8 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { generateVideo, generateVideoFromImage } = require('./fireflyService');
 const fs = require('fs');
-const { setLicense, checkUserAccess, getAllUsers, getActiveUsersOnly, deleteUser, addDaysToAllUsers } = require('./database.js'); 
+// Impor semua fungsi, termasuk 'addDaysToActiveUsers'
+const { setLicense, checkUserAccess, getAllUsers, getActiveUsersOnly, deleteUser, addDaysToAllUsers, addDaysToActiveUsers } = require('./database.js'); 
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const ADMIN_USER_ID = "959684975"; 
@@ -109,6 +110,7 @@ bot.onText(/\/listusers/, async (msg) => {
     } catch (err) { bot.sendMessage(msg.chat.id, `Gagal mengambil daftar pengguna: ${err.message}`); }
 });
 
+// Tambah hari ke SEMUA user (termasuk yang mati)
 bot.onText(/\/adddays (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
@@ -118,6 +120,18 @@ bot.onText(/\/adddays (.+)/, async (msg, match) => {
         bot.sendMessage(msg.chat.id, response); 
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
+
+// === [BARU] Tambah hari HANYA ke user AKTIF ===
+bot.onText(/\/addactive (.+)/, async (msg, match) => {
+    if (msg.from.id.toString() !== ADMIN_USER_ID) return;
+    try {
+        const days = parseInt(match[1], 10);
+        if (isNaN(days) || days <= 0) throw new Error("Format salah.");
+        const response = await addDaysToActiveUsers(days);
+        bot.sendMessage(msg.chat.id, response); 
+    } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
+});
+// ==============================================
 
 bot.onText(/\/mt (.+)/, (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
@@ -173,37 +187,75 @@ bot.on('message', async (msg) => {
 
     const promptText = msg.text;
 
-    // --- ALUR T2V ---
+    // --- ALUR T2V (MENDUKUNG JSON + QUALITY) ---
     if (state.step === 'awaiting_prompt_t2v') { 
         try { await checkUserAccess(userId); } catch (err) {
             bot.sendMessage(chatId, `❌ Akses Ditolak: ${err.message}`);
             userState.delete(chatId);
             return; 
         }
-        const prompt = promptText;
-        userState.set(chatId, { step: 'awaiting_ratio_t2v', prompt: prompt });
-        bot.sendMessage(chatId, `✅ Prompt T2V diterima.\nSekarang, silakan pilih rasio aspek T2V:`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [ { text: 'Landscape 16:9', callback_data: 'ratio_t2v_16:9' }, { text: 'Portrait 9:16', callback_data: 'ratio_t2v_9:16' } ],
-                    [ { text: '❌ Batal', callback_data: 'cancel_process' } ]
-                ]
-            }
-        });
+        
+        try {
+            const jsonInput = JSON.parse(promptText);
+            if (jsonInput.prompt && jsonInput.aspectRatio) {
+                userState.delete(chatId);
+                const statusMsg = await bot.sendMessage(chatId, `✅ JSON T2V diterima.\nMode: JSON Shortcut\nKualitas: ${jsonInput.quality || '720p'}\n\nMemulai proses...`);
+                const settings = {
+                    prompt: jsonInput.prompt,
+                    aspectRatio: jsonInput.aspectRatio,
+                    quality: jsonInput.quality || '720p',
+                    seed: jsonInput.seed, 
+                    videoModelKey: jsonInput.videoModelKey,
+                    muteAudio: false
+                };
+                startTextGeneration(chatId, settings, statusMsg.message_id);
+                return; 
+            } else { throw new Error("JSON tidak valid."); }
+        } catch (e) {
+            const prompt = promptText;
+            userState.set(chatId, { step: 'awaiting_ratio_t2v', prompt: prompt });
+            bot.sendMessage(chatId, `✅ Prompt T2V diterima.\nSekarang, silakan pilih rasio aspek T2V:`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [ { text: 'Landscape 16:9', callback_data: 'ratio_t2v_16:9' }, { text: 'Portrait 9:16', callback_data: 'ratio_t2v_9:16' } ],
+                        [ { text: '❌ Batal', callback_data: 'cancel_process' } ]
+                    ]
+                }
+            });
+        }
     } 
-    // --- ALUR I2V ---
+    // --- ALUR I2V (MENDUKUNG JSON + QUALITY) ---
     else if (state.step === 'awaiting_prompt_i2v') {
         const fileId = state.fileId;
-        const prompt = promptText;
-        userState.set(chatId, { step: 'awaiting_ratio_i2v', prompt: prompt, fileId: fileId });
-        bot.sendMessage(chatId, `✅ Prompt I2V diterima.\nSekarang, silakan pilih rasio aspek I2V:`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [ { text: 'Landscape 16:9', callback_data: 'ratio_i2v_16:9' }, { text: 'Portrait 9:16', callback_data: 'ratio_i2v_9:16' } ],
-                    [ { text: '❌ Batal', callback_data: 'cancel_process' } ]
-                ]
-            }
-        });
+        
+        try {
+            const jsonInput = JSON.parse(promptText);
+            if (jsonInput.prompt && jsonInput.aspectRatio) {
+                userState.delete(chatId);
+                const statusMsg = await bot.sendMessage(chatId, `✅ JSON I2V diterima.\nMode: JSON Shortcut\nKualitas: ${jsonInput.quality || '720p'}\n\nMemulai proses...`);
+                const settings = {
+                    prompt: jsonInput.prompt,
+                    aspectRatio: jsonInput.aspectRatio,
+                    quality: jsonInput.quality || '720p',
+                    seed: jsonInput.seed, 
+                    videoModelKey: jsonInput.videoModelKey,
+                    muteAudio: false
+                };
+                startImageGeneration(chatId, settings, fileId, statusMsg.message_id);
+                return;
+            } else { throw new Error("JSON tidak valid."); }
+        } catch (e) {
+            const prompt = promptText;
+            userState.set(chatId, { step: 'awaiting_ratio_i2v', prompt: prompt, fileId: fileId });
+            bot.sendMessage(chatId, `✅ Prompt I2V diterima: "${prompt.substring(0, 50)}..."\nSekarang, silakan pilih rasio aspek I2V:`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [ { text: 'Landscape 16:9', callback_data: 'ratio_i2v_16:9' }, { text: 'Portrait 9:16', callback_data: 'ratio_i2v_9:16' } ],
+                        [ { text: '❌ Batal', callback_data: 'cancel_process' } ]
+                    ]
+                }
+            });
+        }
     }
 });
 
@@ -229,7 +281,7 @@ bot.on('callback_query', async (query) => {
     if (data === 'mode_t2v') {
         try { await checkUserAccess(userId); } catch (err) { return; }
         userState.set(chatId, { step: 'awaiting_prompt_t2v' });
-        bot.editMessageText("Mode: ✏️ Text to Video\n\nSilakan kirimkan prompt video Anda...", { chat_id: chatId, message_id: msgId });
+        bot.editMessageText("Mode: ✏️ Text to Video\n\nSilakan kirimkan prompt video Anda (bisa Teks Biasa atau format JSON)...", { chat_id: chatId, message_id: msgId });
         bot.sendMessage(chatId, "↑ Balas pesan ini dengan prompt Anda ↑", { reply_markup: { force_reply: true } });
         return;
     }
@@ -269,20 +321,16 @@ bot.on('callback_query', async (query) => {
         startTextGeneration(chatId, settings, msgId);
     }
     
-    // === HANDLER I2V (UPDATED: Added Quality Selection) ===
+    // === HANDLER I2V ===
     if (data.startsWith('ratio_i2v_') && state.step === 'awaiting_ratio_i2v') {
         const aspectRatio = data.split('_')[2];
-        
-        // CEK RASIO I2V
         if (aspectRatio === '9:16') {
-            // PORTRAIT -> LANGSUNG 720P
             const { prompt, fileId } = state;
             userState.delete(chatId); 
             bot.editMessageText(`✅ I2V Diterima (Portrait).\n\nPrompt: "${prompt.substring(0,30)}..."\nRasio: ${aspectRatio}\nKualitas: 720p (Max)\n\nMemulai proses...`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
             const settings = { prompt: prompt, aspectRatio: aspectRatio, quality: '720p', muteAudio: false };
             startImageGeneration(chatId, settings, fileId, msgId);
         } else {
-            // LANDSCAPE -> PILIH KUALITAS
             state.aspectRatio = aspectRatio;
             state.step = 'awaiting_quality_i2v';
             userState.set(chatId, state);
