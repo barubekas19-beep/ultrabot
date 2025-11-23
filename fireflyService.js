@@ -33,7 +33,7 @@ const createGoogleHeaders = (token) => ({
 // ===================================
 
 
-// --- FUNGSI T2V (FIXED UPSCALE LOGIC) ---
+// --- FUNGSI T2V (FIXED UPSCALE LOGIC - MATCHING MAIN.JS) ---
 async function generateVideo(settings, onStatusUpdate) {
     const { prompt, aspectRatio, quality, seed: seedInput, videoModelKey: modelKeyInput } = settings;
     const savePath = path.join(__dirname, 'downloads');
@@ -107,8 +107,8 @@ async function generateVideo(settings, onStatusUpdate) {
 
             // --- TAHAP 2: UPSCALE (Jika User Pilih 1080p) ---
             if (isUpscale && fullMetadata) {
-                // FIX: Hanya ambil Media ID yang valid, jangan ambil 'name'
-                const idToUse = fullMetadata.video?.mediaGenerationId || fullMetadata.video?.mediaId;
+                // KOREKSI: Mengikuti logika main.js persis (name prioritas, lalu mediaGenerationId)
+                const idToUse = fullMetadata.name || fullMetadata.video?.mediaGenerationId || fullMetadata.video?.mediaId || fullMetadata.id;
                 
                 if (idToUse) {
                     onStatusUpdate("🎬 Memulai Upscale ke 1080p... (Tahap 2)");
@@ -116,7 +116,7 @@ async function generateVideo(settings, onStatusUpdate) {
                     const upscaleBody = {
                         "clientContext": { "projectId": "d4b08afb-1a05-4513-a216-f3a7ffaf6147", "tool": "PINHOLE", "userPaygateTier": "PAYGATE_TIER_TWO" },
                         "requests": [{
-                            // FIX: Hapus aspectRatio di request Upscale (menyebabkan Error 400)
+                            "aspectRatio": apiAspectRatio, // KOREKSI: Aspect Ratio dikembalikan seperti main.js
                             "seed": seed,
                             "videoModelKey": "veo_2_1080p_upsampler_8s", 
                             "videoInput": { 
@@ -131,7 +131,6 @@ async function generateVideo(settings, onStatusUpdate) {
                         
                         if (upscaleResponse.data?.operations?.[0]) {
                             operationName = upscaleResponse.data.operations[0].operation.name;
-                            // Gunakan sceneId baru jika ada, atau pakai yang lama
                             responseSceneId = upscaleResponse.data.operations[0].sceneId || responseSceneId;
                             
                             onStatusUpdate("Menunggu render 1080p... (1-2 menit lagi)");
@@ -164,7 +163,7 @@ async function generateVideo(settings, onStatusUpdate) {
                         }
                     } catch (errUpscale) {
                         console.error("Upscale Error:", errUpscale.response ? JSON.stringify(errUpscale.response.data) : errUpscale.message);
-                        onStatusUpdate("⚠️ Gagal request Upscale. Mengirim versi 720p.");
+                        onStatusUpdate("⚠️ Gagal request Upscale (Error 400/500). Mengirim versi 720p.");
                     }
                 } else {
                     onStatusUpdate("⚠️ Gagal mendapatkan ID Video untuk Upscale. Mengirim versi 720p.");
