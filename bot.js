@@ -173,14 +173,13 @@ bot.on('message', async (msg) => {
 
     const promptText = msg.text;
 
-    // --- ALUR T2V (Text-to-Video) ---
+    // --- ALUR T2V ---
     if (state.step === 'awaiting_prompt_t2v') { 
         try { await checkUserAccess(userId); } catch (err) {
             bot.sendMessage(chatId, `❌ Akses Ditolak: ${err.message}`);
             userState.delete(chatId);
             return; 
         }
-        
         const prompt = promptText;
         userState.set(chatId, { step: 'awaiting_ratio_t2v', prompt: prompt });
         bot.sendMessage(chatId, `✅ Prompt T2V diterima.\nSekarang, silakan pilih rasio aspek T2V:`, {
@@ -192,12 +191,12 @@ bot.on('message', async (msg) => {
             }
         });
     } 
-    // --- ALUR I2V (Image-to-Video) ---
+    // --- ALUR I2V ---
     else if (state.step === 'awaiting_prompt_i2v') {
         const fileId = state.fileId;
         const prompt = promptText;
         userState.set(chatId, { step: 'awaiting_ratio_i2v', prompt: prompt, fileId: fileId });
-        bot.sendMessage(chatId, `✅ Prompt I2V diterima: "${prompt.substring(0, 50)}..."\nSekarang, silakan pilih rasio aspek I2V:`, {
+        bot.sendMessage(chatId, `✅ Prompt I2V diterima.\nSekarang, silakan pilih rasio aspek I2V:`, {
             reply_markup: {
                 inline_keyboard: [
                     [ { text: 'Landscape 16:9', callback_data: 'ratio_i2v_16:9' }, { text: 'Portrait 9:16', callback_data: 'ratio_i2v_9:16' } ],
@@ -244,119 +243,88 @@ bot.on('callback_query', async (query) => {
     
     if (!state) return;
 
-    // --- LANGKAH 2 T2V: Pilih Rasio ---
+    // === HANDLER T2V ===
     if (data.startsWith('ratio_t2v_') && state.step === 'awaiting_ratio_t2v') {
-        const aspectRatio = data.split('_')[2]; // '16:9' atau '9:16'
-        
-        // LOGIKA BARU: Cek Rasio
+        const aspectRatio = data.split('_')[2];
         if (aspectRatio === '9:16') {
-            // === PORTRAIT (9:16) -> LANGSUNG 720P (SKIP MENU KUALITAS) ===
             const prompt = state.prompt;
             userState.delete(chatId); 
-
-            bot.editMessageText(
-                `✅ T2V Diterima (Portrait).\n\nPrompt: "${prompt}"\nRasio: ${aspectRatio}\nKualitas: 720p (Max untuk Portrait)\n\nMemulai proses...`, 
-                { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } } 
-            ).catch(err => {});
-            
-            // Paksa kualitas '720p'
+            bot.editMessageText(`✅ T2V Diterima (Portrait).\n\nPrompt: "${prompt}"\nRasio: ${aspectRatio}\nKualitas: 720p (Max)\n\nMemulai proses...`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
             const settings = { prompt: prompt, aspectRatio: aspectRatio, quality: '720p', muteAudio: false };
             startTextGeneration(chatId, settings, msgId);
-
         } else {
-            // === LANDSCAPE (16:9) -> TAMPILKAN MENU KUALITAS ===
             state.aspectRatio = aspectRatio;
             state.step = 'awaiting_quality_t2v';
             userState.set(chatId, state);
-
-            bot.editMessageText(
-                `✅ Rasio ${aspectRatio} dipilih.\nSekarang pilih kualitas video:`, 
-                { 
-                    chat_id: chatId, message_id: msgId, 
-                    reply_markup: { 
-                        inline_keyboard: [
-                            [ { text: '⚡ 720p (Cepat)', callback_data: 'quality_t2v_720p' } ],
-                            [ { text: '🌟 1080p (HD - Upscale)', callback_data: 'quality_t2v_1080p' } ], // Hanya muncul di Landscape
-                            [ { text: '❌ Batal', callback_data: 'cancel_process' } ]
-                        ] 
-                    } 
-                }
-            ).catch(err => console.log("Gagal edit pesan 'Pilih Kualitas'"));
+            bot.editMessageText(`✅ Rasio ${aspectRatio}.\nPilih kualitas video:`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [[ { text: '⚡ 720p', callback_data: 'quality_t2v_720p' } ],[ { text: '🌟 1080p (HD)', callback_data: 'quality_t2v_1080p' } ],[ { text: '❌ Batal', callback_data: 'cancel_process' } ]] } }).catch(err => {});
         }
     }
 
-    // --- LANGKAH 3 T2V: Pilih Kualitas (Hanya Landscape) -> Generate ---
     if (data.startsWith('quality_t2v_') && state.step === 'awaiting_quality_t2v') {
-        const quality = data.split('_')[2]; 
+        const quality = data.split('_')[2];
         const { prompt, aspectRatio } = state;
         userState.delete(chatId);
-
-        bot.editMessageText(
-            `✅ T2V Diterima.\n\nPrompt: "${prompt}"\nRasio: ${aspectRatio}\nKualitas: ${quality}\n\nMemulai proses...`, 
-            { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } } 
-        ).catch(err => {});
-        
+        bot.editMessageText(`✅ T2V Diterima.\n\nPrompt: "${prompt}"\nRasio: ${aspectRatio}\nKualitas: ${quality}\n\nMemulai proses...`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
         const settings = { prompt: prompt, aspectRatio: aspectRatio, quality: quality, muteAudio: false };
         startTextGeneration(chatId, settings, msgId);
     }
     
-    // --- ALUR I2V (Langsung 720p) ---
+    // === HANDLER I2V (UPDATED: Added Quality Selection) ===
     if (data.startsWith('ratio_i2v_') && state.step === 'awaiting_ratio_i2v') {
-        const aspectRatio = data.split('_')[2]; 
-        const { prompt, fileId } = state;
-        userState.delete(chatId); 
-
-        bot.editMessageText(
-            `✅ I2V Diterima.\n\nPrompt: "${prompt}"\nRasio: ${aspectRatio}\n\nMemulai proses...`, 
-            { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } } 
-        ).catch(err => {});
+        const aspectRatio = data.split('_')[2];
         
-        const settings = { prompt: prompt, aspectRatio: aspectRatio, muteAudio: false };
+        // CEK RASIO I2V
+        if (aspectRatio === '9:16') {
+            // PORTRAIT -> LANGSUNG 720P
+            const { prompt, fileId } = state;
+            userState.delete(chatId); 
+            bot.editMessageText(`✅ I2V Diterima (Portrait).\n\nPrompt: "${prompt.substring(0,30)}..."\nRasio: ${aspectRatio}\nKualitas: 720p (Max)\n\nMemulai proses...`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
+            const settings = { prompt: prompt, aspectRatio: aspectRatio, quality: '720p', muteAudio: false };
+            startImageGeneration(chatId, settings, fileId, msgId);
+        } else {
+            // LANDSCAPE -> PILIH KUALITAS
+            state.aspectRatio = aspectRatio;
+            state.step = 'awaiting_quality_i2v';
+            userState.set(chatId, state);
+            bot.editMessageText(`✅ Rasio ${aspectRatio}.\nPilih kualitas video:`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [[ { text: '⚡ 720p', callback_data: 'quality_i2v_720p' } ],[ { text: '🌟 1080p (HD)', callback_data: 'quality_i2v_1080p' } ],[ { text: '❌ Batal', callback_data: 'cancel_process' } ]] } }).catch(err => {});
+        }
+    }
+
+    if (data.startsWith('quality_i2v_') && state.step === 'awaiting_quality_i2v') {
+        const quality = data.split('_')[2];
+        const { prompt, aspectRatio, fileId } = state;
+        userState.delete(chatId);
+        bot.editMessageText(`✅ I2V Diterima.\n\nPrompt: "${prompt.substring(0,30)}..."\nRasio: ${aspectRatio}\nKualitas: ${quality}\n\nMemulai proses...`, { chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
+        const settings = { prompt: prompt, aspectRatio: aspectRatio, quality: quality, muteAudio: false };
         startImageGeneration(chatId, settings, fileId, msgId);
     }
 });
 
 async function startTextGeneration(chatId, settings, statusMessageId) {
     const onStatusUpdate = (text) => {
-        bot.editMessageText(
-            `Status: ${text}`, 
-            { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }
-        ).catch(err => {});
+        bot.editMessageText(`Status: ${text}`, { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
     };
-
     try {
         const videoPath = await generateVideo(settings, onStatusUpdate); 
         const stats = fs.statSync(videoPath);
         const fileSizeInMB = stats.size / (1024 * 1024);
-
-        if (fileSizeInMB > 50) {
-            bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`);
-        } else {
+        if (fileSizeInMB > 50) { bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); } 
+        else {
             onStatusUpdate("Mengunggah video ke Telegram...");
-            const maxPromptLength = 900; 
-            const truncatedPrompt = settings.prompt.length > maxPromptLength ? settings.prompt.substring(0, maxPromptLength) + "..." : settings.prompt;
-            const captionText = `✅ Selesai (T2V - ${settings.quality})!\nPrompt: "${truncatedPrompt}"`;
-            await bot.sendVideo(chatId, videoPath, { caption: captionText });
+            await bot.sendVideo(chatId, videoPath, { caption: `✅ Selesai (T2V - ${settings.quality})!\nPrompt: "${settings.prompt.substring(0, 900)}"` });
             await bot.deleteMessage(chatId, statusMessageId).catch(err => {});
         }
         fs.unlinkSync(videoPath);
     } catch (error) {
         console.error(error); 
         bot.editMessageText(`❌ Terjadi Error: ${error.message}`, { chat_id: chatId, message_id: statusMessageId });
-    } finally {
-        userState.delete(chatId); 
-        await sendModeSelection(chatId); 
-    }
+    } finally { userState.delete(chatId); await sendModeSelection(chatId); }
 }
 
 async function startImageGeneration(chatId, settings, fileId, statusMessageId) {
     const onStatusUpdate = (text) => {
-        bot.editMessageText(
-            `Status: ${text}`, 
-            { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }
-        ).catch(err => {});
+        bot.editMessageText(`Status: ${text}`, { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
     };
-
     try {
         onStatusUpdate("Mengunduh gambar...");
         const fileStream = bot.getFileStream(fileId);
@@ -367,20 +335,15 @@ async function startImageGeneration(chatId, settings, fileId, statusMessageId) {
         const videoPath = await generateVideoFromImage(settings, onStatusUpdate);
         const stats = fs.statSync(videoPath);
         const fileSizeInMB = stats.size / (1024 * 1024);
-
-        if (fileSizeInMB > 50) {
-            bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`);
-        } else {
+        if (fileSizeInMB > 50) { bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); } 
+        else {
             onStatusUpdate("Mengunggah video ke Telegram...");
-            await bot.sendVideo(chatId, videoPath, { caption: `✅ Selesai (I2V)!\nPrompt: "${settings.prompt.substring(0, 900)}"` });
+            await bot.sendVideo(chatId, videoPath, { caption: `✅ Selesai (I2V - ${settings.quality})!\nPrompt: "${settings.prompt.substring(0, 900)}"` });
             await bot.deleteMessage(chatId, statusMessageId).catch(err => {});
         }
         fs.unlinkSync(videoPath);
     } catch (error) {
         console.error(error); 
         bot.editMessageText(`❌ Terjadi Error: ${error.message}`, { chat_id: chatId, message_id: statusMessageId });
-    } finally {
-        userState.delete(chatId); 
-        await sendModeSelection(chatId); 
-    }
+    } finally { userState.delete(chatId); await sendModeSelection(chatId); }
 }
