@@ -4,7 +4,6 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { generateVideo, generateVideoFromImage } = require('./fireflyService');
 const fs = require('fs');
-// Impor semua fungsi, termasuk 'addDaysToActiveUsers'
 const { setLicense, checkUserAccess, getAllUsers, getActiveUsersOnly, deleteUser, addDaysToAllUsers, addDaysToActiveUsers } = require('./database.js'); 
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -22,7 +21,7 @@ if (ADMIN_USER_ID === "GANTI_DENGAN_ID_ADMIN_ANDA") {
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 let userState = new Map();
-console.log('Bot Telegram sedang berjalan...');
+console.log('✅ Bot Telegram sedang berjalan...');
 
 async function sendModeSelection(chatId) {
     userState.delete(chatId); 
@@ -39,25 +38,30 @@ async function sendModeSelection(chatId) {
 }
 
 bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id.toString();
+    const userName = msg.from.first_name || 'Pengguna';
+    
+    console.log(`[LOG] User ${userName} (${userId}) memulai bot (/start).`); // LOG BARU
+
     if (isMaintenanceMode && msg.from.id.toString() !== ADMIN_USER_ID) {
         return bot.sendMessage(msg.chat.id, "⚠️ **SISTEM SEDANG MAINTENANCE**\n\nMohon maaf, bot sedang dalam perbaikan/update sistem. Silakan coba lagi nanti.");
     }
     userState.delete(msg.chat.id);
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    const userName = msg.from.first_name || 'Pengguna';
 
     await bot.sendMessage(chatId, `👋 Halo, ${userName}!\nBot ini adalah bot premium dengan sistem lisensi.\nKetik /buat untuk memulai, atau hubungi admin untuk aktivasi lisensi.`);
     try {
         const accessMessage = await checkUserAccess(userId);
         await bot.sendMessage(chatId, `👤 Status Lisensi Anda:\n${accessMessage}`); 
     } catch (err) {
+        console.log(`[AUTH] Akses ditolak untuk ${userId}: ${err.message}`); // LOG BARU
         await bot.sendMessage(chatId, `❌ Akses Ditolak: ${err.message}`);
     }
     await sendModeSelection(chatId); 
 });
 
 bot.onText(/\/batal/, (msg) => {
+    console.log(`[LOG] User ${msg.from.id} membatalkan proses.`);
     if (userState.has(msg.chat.id)) {
         userState.delete(msg.chat.id);
         bot.sendMessage(msg.chat.id, "Proses dibatalkan.");
@@ -75,6 +79,7 @@ bot.onText(/\/lisensi (.+)/, async (msg, match) => {
         const expirationDate = args[1];
         const username = `user_${userId}`; 
         const response = await setLicense(userId, username, expirationDate);
+        console.log(`[ADMIN] Set lisensi: ${response}`);
         bot.sendMessage(msg.chat.id, response);
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
@@ -84,6 +89,7 @@ bot.onText(/\/blokir (.+)/, async (msg, match) => {
     try {
         const userId = match[1].trim(); 
         const response = await setLicense(userId, 'blocked_user', '2000-01-01');
+        console.log(`[ADMIN] Blokir user: ${userId}`);
         bot.sendMessage(msg.chat.id, `Pengguna ${userId} telah diblokir.`);
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
@@ -93,6 +99,7 @@ bot.onText(/\/hapus (.+)/, async (msg, match) => {
     try {
         const userId = match[1].trim(); 
         const response = await deleteUser(userId);
+        console.log(`[ADMIN] Hapus user: ${userId}`);
         bot.sendMessage(msg.chat.id, response);
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
@@ -110,37 +117,38 @@ bot.onText(/\/listusers/, async (msg) => {
     } catch (err) { bot.sendMessage(msg.chat.id, `Gagal mengambil daftar pengguna: ${err.message}`); }
 });
 
-// Tambah hari ke SEMUA user (termasuk yang mati)
 bot.onText(/\/adddays (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
         const days = parseInt(match[1], 10);
         if (isNaN(days) || days <= 0) throw new Error("Format salah.");
         const response = await addDaysToAllUsers(days);
+        console.log(`[ADMIN] Add Days All: ${days}`);
         bot.sendMessage(msg.chat.id, response); 
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
 
-// === [BARU] Tambah hari HANYA ke user AKTIF ===
 bot.onText(/\/addactive (.+)/, async (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     try {
         const days = parseInt(match[1], 10);
         if (isNaN(days) || days <= 0) throw new Error("Format salah.");
         const response = await addDaysToActiveUsers(days);
+        console.log(`[ADMIN] Add Days Active: ${days}`);
         bot.sendMessage(msg.chat.id, response); 
     } catch (err) { bot.sendMessage(msg.chat.id, `Error: ${err.message}`); }
 });
-// ==============================================
 
 bot.onText(/\/mt (.+)/, (msg, match) => {
     if (msg.from.id.toString() !== ADMIN_USER_ID) return;
     const action = match[1].toLowerCase().trim();
     if (action === 'on') {
         isMaintenanceMode = true;
+        console.log(`[ADMIN] Maintenance Mode: ON`);
         bot.sendMessage(msg.chat.id, "Pv 🛠️ **MAINTENANCE MODE: AKTIF**\n\nUser biasa tidak bisa menggunakan bot. Admin tetap bisa.");
     } else if (action === 'off') {
         isMaintenanceMode = false;
+        console.log(`[ADMIN] Maintenance Mode: OFF`);
         bot.sendMessage(msg.chat.id, "✅ **MAINTENANCE MODE: MATI**\n\nBot kembali normal untuk semua user.");
     }
 });
@@ -166,6 +174,7 @@ bot.on('photo', async (msg) => {
     catch (err) { bot.sendMessage(chatId, `❌ Akses Ditolak: ${err.message}`); return; }
 
     if (state && state.step === 'awaiting_photo_i2v') {
+        console.log(`[I2V] User ${msg.from.id} mengirim gambar.`); // LOG BARU
         const photo = msg.photo[msg.photo.length - 1];
         const fileId = photo.file_id;
         userState.set(chatId, { step: 'awaiting_prompt_i2v', fileId: fileId }); 
@@ -187,7 +196,7 @@ bot.on('message', async (msg) => {
 
     const promptText = msg.text;
 
-    // --- ALUR T2V (MENDUKUNG JSON + QUALITY) ---
+    // --- ALUR T2V ---
     if (state.step === 'awaiting_prompt_t2v') { 
         try { await checkUserAccess(userId); } catch (err) {
             bot.sendMessage(chatId, `❌ Akses Ditolak: ${err.message}`);
@@ -196,14 +205,18 @@ bot.on('message', async (msg) => {
         }
         
         try {
+            // JSON INPUT CHECK
             const jsonInput = JSON.parse(promptText);
             if (jsonInput.prompt && jsonInput.aspectRatio) {
                 userState.delete(chatId);
-                const statusMsg = await bot.sendMessage(chatId, `✅ JSON T2V diterima.\nMode: JSON Shortcut\nKualitas: ${jsonInput.quality || '720p'}\n\nMemulai proses...`);
+                const quality = jsonInput.quality || '720p';
+                console.log(`[T2V-JSON] User ${userId}: Prompt JSON diterima. Quality: ${quality}`); // LOG BARU
+                
+                const statusMsg = await bot.sendMessage(chatId, `✅ JSON T2V diterima.\nMode: JSON Shortcut\nKualitas: ${quality}\n\nMemulai proses...`);
                 const settings = {
                     prompt: jsonInput.prompt,
                     aspectRatio: jsonInput.aspectRatio,
-                    quality: jsonInput.quality || '720p',
+                    quality: quality,
                     seed: jsonInput.seed, 
                     videoModelKey: jsonInput.videoModelKey,
                     muteAudio: false
@@ -212,6 +225,8 @@ bot.on('message', async (msg) => {
                 return; 
             } else { throw new Error("JSON tidak valid."); }
         } catch (e) {
+            // MANUAL INPUT
+            console.log(`[T2V] User ${userId}: Prompt teks diterima: "${promptText.substring(0,30)}..."`); // LOG BARU
             const prompt = promptText;
             userState.set(chatId, { step: 'awaiting_ratio_t2v', prompt: prompt });
             bot.sendMessage(chatId, `✅ Prompt T2V diterima.\nSekarang, silakan pilih rasio aspek T2V:`, {
@@ -224,19 +239,22 @@ bot.on('message', async (msg) => {
             });
         }
     } 
-    // --- ALUR I2V (MENDUKUNG JSON + QUALITY) ---
+    // --- ALUR I2V ---
     else if (state.step === 'awaiting_prompt_i2v') {
         const fileId = state.fileId;
-        
         try {
+            // JSON INPUT CHECK
             const jsonInput = JSON.parse(promptText);
             if (jsonInput.prompt && jsonInput.aspectRatio) {
                 userState.delete(chatId);
-                const statusMsg = await bot.sendMessage(chatId, `✅ JSON I2V diterima.\nMode: JSON Shortcut\nKualitas: ${jsonInput.quality || '720p'}\n\nMemulai proses...`);
+                const quality = jsonInput.quality || '720p';
+                console.log(`[I2V-JSON] User ${userId}: Prompt JSON diterima.`); // LOG BARU
+
+                const statusMsg = await bot.sendMessage(chatId, `✅ JSON I2V diterima.\nMode: JSON Shortcut\nKualitas: ${quality}\n\nMemulai proses...`);
                 const settings = {
                     prompt: jsonInput.prompt,
                     aspectRatio: jsonInput.aspectRatio,
-                    quality: jsonInput.quality || '720p',
+                    quality: quality,
                     seed: jsonInput.seed, 
                     videoModelKey: jsonInput.videoModelKey,
                     muteAudio: false
@@ -245,6 +263,7 @@ bot.on('message', async (msg) => {
                 return;
             } else { throw new Error("JSON tidak valid."); }
         } catch (e) {
+            console.log(`[I2V] User ${userId}: Prompt teks diterima.`); // LOG BARU
             const prompt = promptText;
             userState.set(chatId, { step: 'awaiting_ratio_i2v', prompt: prompt, fileId: fileId });
             bot.sendMessage(chatId, `✅ Prompt I2V diterima: "${prompt.substring(0, 50)}..."\nSekarang, silakan pilih rasio aspek I2V:`, {
@@ -266,6 +285,8 @@ bot.on('callback_query', async (query) => {
     const data = query.data;
     const state = userState.get(chatId);
     const msgId = query.message.message_id;
+
+    // console.log(`[CLICK] User ${userId} klik tombol: ${data}`); // LOG OPTIONAL (Agar tidak spam)
 
     if (isMaintenanceMode && userId !== ADMIN_USER_ID) {
         return bot.answerCallbackQuery(query.id, { text: "⚠️ Sedang Maintenance. Coba lagi nanti.", show_alert: true });
@@ -350,27 +371,32 @@ bot.on('callback_query', async (query) => {
 
 async function startTextGeneration(chatId, settings, statusMessageId) {
     const onStatusUpdate = (text) => {
+        console.log(`[PROCESS T2V] ${chatId}: ${text}`); // LOG BARU (Penting untuk Railway)
         bot.editMessageText(`Status: ${text}`, { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
     };
     try {
         const videoPath = await generateVideo(settings, onStatusUpdate); 
         const stats = fs.statSync(videoPath);
         const fileSizeInMB = stats.size / (1024 * 1024);
-        if (fileSizeInMB > 50) { bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); } 
-        else {
+        if (fileSizeInMB > 50) { 
+            console.log(`[FAIL T2V] Video too large: ${fileSizeInMB}MB`);
+            bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); 
+        } else {
             onStatusUpdate("Mengunggah video ke Telegram...");
             await bot.sendVideo(chatId, videoPath, { caption: `✅ Selesai (T2V - ${settings.quality})!\nPrompt: "${settings.prompt.substring(0, 900)}"` });
+            console.log(`[SUCCESS T2V] Video sent to ${chatId}`);
             await bot.deleteMessage(chatId, statusMessageId).catch(err => {});
         }
         fs.unlinkSync(videoPath);
     } catch (error) {
-        console.error(error); 
+        console.error(`[ERROR T2V] ${error.message}`); 
         bot.editMessageText(`❌ Terjadi Error: ${error.message}`, { chat_id: chatId, message_id: statusMessageId });
     } finally { userState.delete(chatId); await sendModeSelection(chatId); }
 }
 
 async function startImageGeneration(chatId, settings, fileId, statusMessageId) {
     const onStatusUpdate = (text) => {
+        console.log(`[PROCESS I2V] ${chatId}: ${text}`); // LOG BARU
         bot.editMessageText(`Status: ${text}`, { chat_id: chatId, message_id: statusMessageId, reply_markup: { inline_keyboard: [] } }).catch(err => {});
     };
     try {
@@ -383,15 +409,18 @@ async function startImageGeneration(chatId, settings, fileId, statusMessageId) {
         const videoPath = await generateVideoFromImage(settings, onStatusUpdate);
         const stats = fs.statSync(videoPath);
         const fileSizeInMB = stats.size / (1024 * 1024);
-        if (fileSizeInMB > 50) { bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); } 
-        else {
+        if (fileSizeInMB > 50) { 
+            console.log(`[FAIL I2V] Video too large: ${fileSizeInMB}MB`);
+            bot.sendMessage(chatId, `❌ Video terlalu besar (${fileSizeInMB.toFixed(2)} MB).`); 
+        } else {
             onStatusUpdate("Mengunggah video ke Telegram...");
             await bot.sendVideo(chatId, videoPath, { caption: `✅ Selesai (I2V - ${settings.quality})!\nPrompt: "${settings.prompt.substring(0, 900)}"` });
+            console.log(`[SUCCESS I2V] Video sent to ${chatId}`);
             await bot.deleteMessage(chatId, statusMessageId).catch(err => {});
         }
         fs.unlinkSync(videoPath);
     } catch (error) {
-        console.error(error); 
+        console.error(`[ERROR I2V] ${error.message}`); 
         bot.editMessageText(`❌ Terjadi Error: ${error.message}`, { chat_id: chatId, message_id: statusMessageId });
     } finally { userState.delete(chatId); await sendModeSelection(chatId); }
 }
